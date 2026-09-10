@@ -1,0 +1,28 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import 'fake-indexeddb/auto';
+await build({entryPoints:['lib/local-store.ts','lib/records.ts'],bundle:true,format:'esm',platform:'node',outdir:'.test-build'});
+const {initializeLocal,readLocal,saveRecords,markExport,milestone,backupText,parseBackup,restoreRecords,recoveryBackup}=await import('../.test-build/local-store.js');
+const {markdown,buildSongIndex,suggest,validateRecords}=await import('../.test-build/records.js');
+const song=(id)=>({id,title:'曲 '+id,artist:'歌手',sungAt:'2026-09-10T10:00:00Z',createdAt:'2026-09-10T10:00:00Z',key:0,score:93.716,machine:'JOY分析採点AI',familiarity:5,throatLoad:2,releaseYear:2020,tempo:'ミドル',memo:'改行\nコメント <script> & "',tags:[{id:10,name:'人前◯',createdAt:'2026-07-01'}],posture:id%2?'立位':''});
+test('保存・通知・復元の一連のデータ保護',async()=>{
+ let s=await initializeLocal();
+ s=await saveRecords({...s,songs:Array.from({length:149},(_,i)=>song(i))},s.revision,'JOY分析採点AI');assert.equal(milestone(s),0);
+ s=await saveRecords({...s,songs:[...s.songs,song(149)]},s.revision);assert.equal(milestone(s),150);
+ s=await markExport('read',s.revision);assert.equal(s.readMilestone,150);assert.equal(s.jsonMilestone,0);
+ s=await markExport('json',s.revision);assert.equal(s.jsonMilestone,150);
+ s=await saveRecords({...s,songs:Array.from({length:200},(_,i)=>song(i))},s.revision);assert.equal(milestone(s),200);assert.ok(s.readMilestone<200&&s.jsonMilestone<200);
+ s=await markExport('json',s.revision);s=await markExport('read',s.revision);assert.equal(s.readMilestone,200);assert.equal(s.jsonMilestone,200);
+ const snapshot=parseBackup(backupText(s));assert.deepEqual(snapshot.records.songs,s.songs);assert.equal(snapshot.lastMachine,'JOY分析採点AI');
+ const stale=s.revision;s=await saveRecords({...s,songs:s.songs.slice(0,149)},s.revision);assert.equal(milestone(s),200);
+ await assert.rejects(saveRecords({...s,songs:[]},stale));await assert.rejects(markExport('read',stale));
+ s=await restoreRecords(snapshot,s.revision);assert.deepEqual((await readLocal()).songs,snapshot.records.songs);assert.equal((await recoveryBackup()).songs.length,149);
+ s=await restoreRecords(snapshot,s.revision);assert.equal(s.songs.length,200,'再取込で重複しない');
+ const old={...song(301)};delete old.posture;validateRecords({songs:[old],tags:[],machines:[]});
+ const before=await readLocal();assert.throws(()=>parseBackup('{broken'));assert.throws(()=>parseBackup(JSON.stringify({format:'yuu-karaoke-backup',version:2,records:snapshot.records})));
+ assert.throws(()=>parseBackup(JSON.stringify({songs:[song(1),song(1)],tags:[],machines:[]})));
+ assert.throws(()=>validateRecords({songs:[{...song(1),familiarity:9}],tags:[],machines:[]}));assert.deepEqual(await readLocal(),before);
+ assert.match(markdown(s.songs).text,/歌唱姿勢：立位/);assert.match(markdown(s.songs).filename,/20260910-20260910/);
+ assert.equal(suggest(buildSongIndex([song(1)]),'曲 1').length,1);
+});
