@@ -5,3 +5,8 @@ await build({entryPoints:['app/main.tsx'],bundle:true,minify:true,sourcemap:fals
 await cp('public','dist',{recursive:true});
 await cp('index.html','dist/index.html');
 await writeFile('dist/.nojekyll','');
+
+// Keep main/root Pages output identical to dist.
+await cp('dist/assets','assets',{recursive:true});
+await cp('public','.',{recursive:true});
+await writeFile('.nojekyll','');

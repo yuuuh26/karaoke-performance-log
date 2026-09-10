@@ -13,7 +13,7 @@
 ## 開発
 
 Node.js 22以上。`npm ci` → `npm test` → `npm run build`。
-`dist`が公開対象。GitHub ActionsでビルドしPagesに公開する。
+`npm run build`は`dist`とリポジトリ直下に同一の公開ファイルを生成する。生成物もコミットする。Pagesはmainブランチのrootから公開。GitHub Actionsでテストとビルドの一致を確認する。
 
 ## 移行
 
