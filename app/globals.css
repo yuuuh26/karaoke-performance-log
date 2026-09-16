@@ -58,6 +58,9 @@ legend { color:#4d596b; font-size:12px; font-weight:700; margin-bottom:6px; }
 .outlineButton,.rowActions button { height:38px; border:1px solid #c9d1dd; background:#fff; color:#344054; border-radius:5px; padding:0 12px; font-size:12px; font-weight:700; }
 .outlineButton:hover,.rowActions button:hover { background:var(--soft); }.outlineButton:disabled { opacity:.45; cursor:default; }
 .songList { border-top:1px solid var(--line); }
+.dayDivider { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 8px; border-bottom:1px solid #c7d8ee; background:#f3f8ff; color:#2f4f73; }
+.dayDivider strong { font-size:13px; }
+.dayDivider span { flex:none; border-radius:999px; background:#fff; border:1px solid #cfe0f4; padding:3px 8px; color:var(--blue); font-size:12px; font-weight:700; }
 .songRow { display:grid; grid-template-columns:minmax(180px,1.1fr) minmax(390px,2fr) auto; gap:18px; align-items:center; min-height:76px; border-bottom:1px solid var(--line); padding:11px 4px; }
 .songIdentity { display:grid; gap:4px; min-width:0; }.songIdentity strong,.songIdentity span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.songIdentity strong { font-size:15px; }.songIdentity span { color:var(--muted); font-size:12px; }.songIdentity small { color:#7d8797; font-size:10px; }
 .songMeta { display:flex; flex-wrap:wrap; gap:6px; }.songMeta span { background:var(--soft); color:#4b5668; border-radius:4px; padding:5px 7px; font-size:11px; }
@@ -75,6 +78,10 @@ legend { color:#4d596b; font-size:12px; font-weight:700; margin-bottom:6px; }
 .entryFields { min-width:0; }
 .dataManager { margin-top:28px; border-top:1px solid var(--line); padding:16px 0; color:var(--muted); font-size:13px; line-height:1.7; }
 .dataManager summary { cursor:pointer; font-size:14px; }
+.appUrlRow { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; margin:12px 0 16px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--soft); }
+.appUrlRow>span { color:#4d596b; font-weight:700; }
+.appUrlRow code { min-width:0; overflow-wrap:anywhere; color:var(--ink); font-size:12px; user-select:all; }
+.appUrlRow .outlineButton { white-space:nowrap; }
 .dataManager p { overflow-wrap:anywhere; }
 .recordTools { flex-wrap:wrap; }
 input,select,textarea { font-size:16px; }
@@ -85,3 +92,5 @@ label,legend,.outlineButton,.rowActions button,.manageButton,.tagChoices>button 
 @media(max-width:560px){.topFields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.topFields>label:nth-child(2){grid-column:1/-1}.releaseYearField{grid-column:1;grid-row:3}.keyField{grid-column:2;grid-row:3}.machineField{grid-column:1;grid-row:4}.scoreField{grid-column:2;grid-row:4}}
 
 html{color-scheme:light} header{background:#eaf4ff} .backupNotice{margin:12px 0;padding:14px;border:1px solid #dfaa30;border-radius:8px;background:#fff7df;line-height:1.6} .backupActions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0} .postureField{margin-top:14px;max-width:420px} .restorePanel{padding:14px;background:#eaf4ff;border-radius:8px;margin:12px 0} .dataManager input[type=file]{height:auto;padding:12px 0;border:0} .notice{color:#176439} button:disabled{cursor:default;opacity:.5}
+
+@media(max-width:560px){.dayDivider{padding:9px 6px}.appUrlRow{grid-template-columns:1fr}.appUrlRow .outlineButton{width:100%}}
