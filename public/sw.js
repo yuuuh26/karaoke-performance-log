@@ -1,4 +1,4 @@
-const CACHE='yuu-karaoke-performance-log-v1';
+const CACHE='yuu-karaoke-performance-log-v2';
 const BASE=new URL('./',self.location.href);
 const ASSETS=['./','./index.html','./assets/app.js','./assets/app.css','./icon-192.png','./icon-512.png','./icon-180.png','./manifest.webmanifest'].map(p=>new URL(p,BASE).href);
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS))));
