@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type Song, type Machine, type Tag, type Records, buildSongIndex, suggest, sorted, markdown } from "../lib/records";
 import { type LocalState, readLocal, initializeLocal, saveRecords, markExport, milestone, backupText, parseBackup, restoreRecords, recoveryBackup } from "../lib/local-store";
@@ -17,6 +17,7 @@ const songKey = (song: Song) => song.title.trim().toLowerCase();
 const toDate = (value: string) => new Date(value.length === 10 ? `${value}T12:00:00+09:00` : value);
 const japanDay = (date: Date) => new Intl.DateTimeFormat("sv-SE", { timeZone:"Asia/Tokyo", year:"numeric", month:"2-digit", day:"2-digit" }).format(date);
 const displayDateTime = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone:"Asia/Tokyo", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }).format(toDate(value));
+const displayHistoryDay = (day: string) => new Intl.DateTimeFormat("ja-JP", { timeZone:"Asia/Tokyo", year:"numeric", month:"numeric", day:"numeric", weekday:"short" }).format(new Date(`${day}T12:00:00+09:00`));
 const toLocalInput = (value: string) => {
   const date = toDate(value);
   const parts = new Intl.DateTimeFormat("sv-SE", { timeZone:"Asia/Tokyo", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }).formatToParts(date);
@@ -88,6 +89,7 @@ export default function Home() {
 
   const filtered = useMemo(() => { const q=query.trim().toLowerCase(); return q ? songs.filter(song => `${song.title} ${song.artist} ${song.releaseYear ?? ""} ${song.tags.map(tag=>tag.name).join(" ")} ${song.memo}`.toLowerCase().includes(q)) : songs; }, [songs,query]);
   const todayCount = useMemo(() => { const today=japanDay(new Date(referenceNow)); return songs.filter(song => japanDay(toDate(song.sungAt)) === today).length; }, [songs,referenceNow]);
+  const dailyCounts = useMemo(() => { const counts=new Map<string,number>(); songs.forEach(song => { const day=japanDay(toDate(song.sungAt)); counts.set(day,(counts.get(day) ?? 0)+1); }); return counts; }, [songs]);
   const recentCounts = useMemo(() => {
     const cutoff=referenceNow-30*24*60*60*1000; const counts=new Map<string,number>();
     songs.forEach(song => { if(toDate(song.sungAt).getTime() >= cutoff) counts.set(songKey(song),(counts.get(songKey(song)) ?? 0)+1); });
@@ -160,11 +162,23 @@ export default function Home() {
   }
   function toggleTag(id:number) { setForm(current=>({...current,tagIds:current.tagIds.includes(id) ? current.tagIds.filter(tagId=>tagId!==id):[...current.tagIds,id]})); }
 
-  const historyView=useMemo(()=>(loading ? <p className="status">読み込み中…</p>:filtered.length===0 ? <p className="status">{query ? "該当する記録がありません":"まだ記録がありません"}</p>:<div className="songList">{filtered.slice(0,visibleCount).map(song=><article className="songRow" key={song.id}>
-        <div className="songIdentity"><strong>{song.title}</strong><span>{song.artist || "歌手名なし"}</span><small>{displayDateTime(song.sungAt)} ・ 直近30日 {recentCounts.get(songKey(song)) ?? 0}回</small></div>
-        <div className="songMeta">{song.posture && <span>姿勢：{song.posture}</span>}{song.tags.map(tag=><span className="songTag" key={tag.id}>#{tag.name}</span>)}{song.releaseYear != null && <span>{song.releaseYear}年リリース</span>}{song.key != null && <span>{keyLabel(song.key)}</span>}{song.score != null && <span>{song.score.toFixed(3)}{song.machine ? ` ${song.machine}`:""}</span>}{song.familiarity != null && <span>熟練 {stars(song.familiarity)}</span>}{song.tempo && <span>{song.tempo}</span>}{song.throatLoad != null && <span>喉 {song.throatLoad}/5</span>}{song.memo && <span className="songComment" title={song.memo}>コメント：{song.memo}</span>}{song.tags.length===0 && song.releaseYear == null && song.key == null && song.score == null && song.familiarity == null && !song.tempo && song.throatLoad == null && !song.memo && !song.posture && <span>詳細記入なし</span>}</div>
-        <div className="rowActions"><button type="button" onClick={()=>copy(outputText(song),String(song.id))}>{copied===String(song.id) ? "コピー済み":"出力"}</button><button type="button" onClick={()=>edit(song)}>編集</button><button type="button" className="danger" onClick={()=>remove(song.id)}>削除</button></div>
-      </article>)}</div>),[loading,filtered,query,visibleCount,recentCounts,copied,remove]);
+  const historyView=useMemo(() => {
+    if(loading)return <p className="status">読み込み中…</p>;
+    if(filtered.length===0)return <p className="status">{query ? "該当する記録がありません":"まだ記録がありません"}</p>;
+    const visibleSongs=filtered.slice(0,visibleCount);
+    return <div className="songList">{visibleSongs.map((song,index)=>{
+      const day=japanDay(toDate(song.sungAt));
+      const previousDay=index===0?null:japanDay(toDate(visibleSongs[index-1].sungAt));
+      return <Fragment key={song.id}>
+        {(index===0||day!==previousDay)&&<div className="dayDivider"><strong>{displayHistoryDay(day)}</strong><span>この日 {dailyCounts.get(day) ?? 0}曲</span></div>}
+        <article className="songRow">
+          <div className="songIdentity"><strong>{song.title}</strong><span>{song.artist || "歌手名なし"}</span><small>{displayDateTime(song.sungAt)} ・ 直近30日 {recentCounts.get(songKey(song)) ?? 0}回</small></div>
+          <div className="songMeta">{song.posture && <span>姿勢：{song.posture}</span>}{song.tags.map(tag=><span className="songTag" key={tag.id}>#{tag.name}</span>)}{song.releaseYear != null && <span>{song.releaseYear}年リリース</span>}{song.key != null && <span>{keyLabel(song.key)}</span>}{song.score != null && <span>{song.score.toFixed(3)}{song.machine ? ` ${song.machine}`:""}</span>}{song.familiarity != null && <span>熟練 {stars(song.familiarity)}</span>}{song.tempo && <span>{song.tempo}</span>}{song.throatLoad != null && <span>喉 {song.throatLoad}/5</span>}{song.memo && <span className="songComment" title={song.memo}>コメント：{song.memo}</span>}{song.tags.length===0 && song.releaseYear == null && song.key == null && song.score == null && song.familiarity == null && !song.tempo && song.throatLoad == null && !song.memo && !song.posture && <span>詳細記入なし</span>}</div>
+          <div className="rowActions"><button type="button" onClick={()=>copy(outputText(song),String(song.id))}>{copied===String(song.id) ? "コピー済み":"出力"}</button><button type="button" onClick={()=>edit(song)}>編集</button><button type="button" className="danger" onClick={()=>remove(song.id)}>削除</button></div>
+        </article>
+      </Fragment>;
+    })}</div>;
+  },[loading,filtered,query,visibleCount,dailyCounts,recentCounts,copied,remove]);
 
   return <main className="appShell">
     <header><h1>うたログ</h1><div className="headerStats"><strong>今日 {todayCount}曲</strong><span>全{songs.length}曲</span></div></header>
@@ -207,6 +221,7 @@ export default function Home() {
     </section>
     {filtered.length>visibleCount && <button type="button" className="outlineButton" onClick={()=>setVisibleCount(n=>n+50)}>さらに50件表示（表示中 {Math.min(visibleCount,filtered.length)} / {filtered.length}件）</button>}
     <details className="dataManager"><summary>設定・データ管理</summary>
+      <div className="appUrlRow"><span>アプリURL</span><code>https://yuuuh26.github.io/karaoke-performance-log/</code><button type="button" className="outlineButton" onClick={()=>copy("https://yuuuh26.github.io/karaoke-performance-log/","app-url")}>{copied==="app-url" ? "コピー済み":"URLをコピー"}</button></div>
       <p>端末の記録：{songs.length}件</p>
       <p>記録データの概算：{sizeKB} KB（JSONのUTF-8サイズ。IndexedDB全体の占有量ではありません）</p>
       <p>最終端末保存：{local?.lastSavedAt ? toLocalInput(local.lastSavedAt).replace('T',' ')+' JST':'未保存'}</p>
