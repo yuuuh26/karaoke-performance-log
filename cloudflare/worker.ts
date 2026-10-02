@@ -1,4 +1,5 @@
-import {APP_ID,digest,validateBackup,type Backup} from '../lib/snapshot';
+import {APP_ID,validateBackup,type Backup} from '../lib/snapshot';
+import {AuthError,verifyKey,getSession,sameOrigin,sessionCookie,sessionRoute} from './sessions';
 type Statement={bind(...args:unknown[]):Statement;first<T=Record<string,unknown>>():Promise<T|null>;all<T=Record<string,unknown>>():Promise<{results:T[]}>};
 type Database={prepare(sql:string):Statement;batch(statements:Statement[]):Promise<unknown[]>};
 export type Env={DB:Database;BACKUP_TOKEN_SHA256:string};
@@ -10,14 +11,6 @@ function reply(body:unknown,status=200,cors=false) {
   return new Response(body===null?null:JSON.stringify(body),{status,headers:{
     'Content-Type':'application/json;charset=utf-8','Cache-Control':'no-store','Vary':'Origin',
     'X-Content-Type-Options':'nosniff',...(cors?{'Access-Control-Allow-Origin':ORIGIN}:{})}});
-}
-async function authenticated(request:Request,env:Env) {
-  if(!/^[0-9a-f]{64}$/.test(env.BACKUP_TOKEN_SHA256??''))throw new ApiError(503,'認証設定が完了していません');
-  const match=/^Bearer ([A-Za-z0-9_-]{43,128})$/.exec(request.headers.get('Authorization')??'');
-  if(!match)throw new ApiError(401,'認証が必要です');
-  const actual=await digest(match[1]);
-  let difference=0;for(let i=0;i<64;i++)difference|=actual.charCodeAt(i)^env.BACKUP_TOKEN_SHA256.charCodeAt(i);
-  if(difference)throw new ApiError(401,'復旧キーを確認してください');
 }
 async function bodyJson(request:Request) {
   const maximum=17*1024*1024;
@@ -69,8 +62,9 @@ async function writeBackup(env:Env,input:Backup,id:string) {
 }
 export default {async fetch(request:Request,env:Env):Promise<Response> {
   const origin=request.headers.get('Origin'),cors=origin===ORIGIN;
+  let cookie:string|undefined;
   try{
-    if(origin&&!cors)throw new ApiError(403,'許可されていないオリジンです');
+    if(origin&&!cors&&origin!==new URL(request.url).origin)throw new ApiError(403,'許可されていないオリジンです');
     const url=new URL(request.url);
     if(request.method==='OPTIONS') {
       if(!cors)throw new ApiError(403,'許可されていないオリジンです');
@@ -79,19 +73,29 @@ export default {async fetch(request:Request,env:Env):Promise<Response> {
       if(headers.some(h=>!['authorization','content-type'].includes(h)))throw new ApiError(403,'許可されていないヘッダーです');
       const response=reply(null,204,true);response.headers.set('Access-Control-Allow-Methods','GET, PUT');response.headers.set('Access-Control-Allow-Headers','Authorization, Content-Type');return response;
     }
-    await authenticated(request,env);
+    const authResponse=await sessionRoute(request,env,bodyJson);
+    if(authResponse)return authResponse;
+    if(request.headers.has('Authorization'))await verifyKey(request,env);
+    else {
+      // Retain Bearer-only access from the old Pages origin. A cookie never
+      // authenticates a different app, even on the same parent domain.
+      if(cors)throw new AuthError(401,'認証が必要です');
+      if(!['GET','HEAD'].includes(request.method))sameOrigin(request);
+      const auth=await getSession(request,env);cookie=sessionCookie(auth.token);
+    }
+    const respond=(body:unknown,status=200)=>{const response=reply(body,status,cors);if(cookie)response.headers.set('Set-Cookie',cookie);return response};
     if(url.pathname==='/v1/backups'&&request.method==='GET') {
       const cursor=url.searchParams.get('cursor');let time='',id='';
       if(cursor){try{[time,id]=JSON.parse(atob(cursor));if(!time||!idPattern.test(id)||new Date(time).toISOString()!==time)throw Error()}catch{throw new ApiError(400,'一覧の続き位置が不正です')}}
       const query=env.DB.prepare(`SELECT ${columns} FROM backups WHERE app_id=? ${cursor?'AND (received_at<? OR (received_at=? AND backup_id<?))':''} ORDER BY received_at DESC,backup_id DESC LIMIT 51`);
       const rows=(await (cursor?query.bind(APP_ID,time,time,id):query.bind(APP_ID)).all<Row>()).results;
       const backups=rows.slice(0,50),last=backups.at(-1);
-      return reply({backups,next_cursor:rows.length>50&&last?btoa(JSON.stringify([last.received_at,last.backup_id])):null},200,cors);
+      return respond({backups,next_cursor:rows.length>50&&last?btoa(JSON.stringify([last.received_at,last.backup_id])):null},200);
     }
     const match=/^\/v1\/backups\/([^/]+)$/.exec(url.pathname);
     if(!match||!idPattern.test(match[1]))throw new ApiError(404,'APIがありません');
-    if(request.method==='GET')return reply(await readBackup(env,match[1]),200,cors);
-    if(request.method==='PUT')return reply(await writeBackup(env,await bodyJson(request),match[1]),200,cors);
+    if(request.method==='GET')return respond(await readBackup(env,match[1]));
+    if(request.method==='PUT')return respond(await writeBackup(env,await bodyJson(request),match[1]));
     throw new ApiError(405,'対応していない操作です');
-  }catch(error){return reply({error:error instanceof ApiError?error.message:'クラウドで処理できませんでした'},error instanceof ApiError?error.status:500,cors)}
+  }catch(error){return reply({error:error instanceof ApiError||error instanceof AuthError?error.message:'クラウドで処理できませんでした'},error instanceof ApiError||error instanceof AuthError?error.status:500,cors)}
 }};

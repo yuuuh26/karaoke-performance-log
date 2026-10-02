@@ -5,3 +5,4 @@ dist/
 .test-worker/
 cloudflare/dist/
 *.log
+.test-auth/

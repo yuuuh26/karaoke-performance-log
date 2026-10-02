@@ -2,31 +2,39 @@ import {useEffect,useRef,useState} from 'react';
 import {captureSnapshot,markCloudBackup,readCloudSettings,saveCloudSettings,type LocalState} from '../lib/local-store';
 import {createBackup,validateBackup,type Backup,type BackupSummary} from '../lib/snapshot';
 import {fetchBackup,listBackups,uploadBackup,type CloudConnection} from '../lib/cloud-backup';
+import {CLOUD_ORIGIN,hosted,CloudError,sessionStatus,login,logout,listSessions,revokeSession,type DeviceSession} from '../lib/cloud-auth';
 import {restoreFromCloud} from '../lib/cloud-restore';
 
 const stamp=(time:string)=>new Date(time).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
 export default function CloudBackups({local,disabled,onSaved,onRestored}:{local:LocalState|null;disabled:boolean;onSaved:(s:LocalState)=>void;onRestored:(s:LocalState)=>void}){
-  const [url,setUrl]=useState(''),[token,setToken]=useState(''),[deviceId,setDeviceId]=useState('');
+  const persistent=hosted();
+  const [deviceName,setDeviceName]=useState('この端末'),[sessions,setSessions]=useState<DeviceSession[]|null>(null);
+  const [url,setUrl]=useState(persistent?CLOUD_ORIGIN:''),[token,setToken]=useState(''),[deviceId,setDeviceId]=useState('');
   const [connected,setConnected]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [history,setHistory]=useState<BackupSummary[]>([]),[cursor,setCursor]=useState<string|null>(null);
   const [retry,setRetry]=useState<Backup|null>(null);
   const [pending,setPending]=useState<{backup:Backup;revision:number;currentCount:number}|null>(null);
   const settingsRef=useRef<HTMLDetailsElement>(null),urlRef=useRef<HTMLInputElement>(null),tokenRef=useRef<HTMLInputElement>(null),running=useRef(false);
-  useEffect(()=>{let active=true;readCloudSettings().then(s=>{if(active&&s){setUrl(s.url);setDeviceId(s.deviceId)}}).catch(()=>{if(active)setError('クラウド設定を読み込めません。通常の記録保存は利用できます')});return()=>{active=false}},[]);
-  const connection=():CloudConnection=>({url:url.trim(),token:token.trim()});
+  useEffect(()=>{let active=true;readCloudSettings().then(s=>{if(active&&s){if(!persistent)setUrl(s.url);setDeviceId(s.deviceId)}}).catch(()=>{if(active)setError('クラウド設定を読み込めません。通常の記録保存は利用できます')});return()=>{active=false}},[]);
+  useEffect(()=>{if(!persistent)return;let active=true;sessionStatus().then(s=>{if(active){setConnected(true);setDeviceName(s.deviceName);listBackups({url:CLOUD_ORIGIN}).then(r=>{if(active){setHistory(r.backups);setCursor(r.next_cursor)}}).catch(()=>{})}}).catch(e=>{if(active&&!(e instanceof CloudError&&e.status===401))setError('ログイン状態を確認できません。オンラインで再確認してください')});return()=>{active=false}},[]);
+  const connection=():CloudConnection=>persistent?{url:CLOUD_ORIGIN}:{url:url.trim(),token:token.trim()};
   const changes=Math.max(0,(local?.importantChanges??0)-(local?.cloudBackup?.backedUpChanges??0));
   const blocked=disabled||busy||!local;
-  async function run(action:()=>Promise<void>){if(running.current)return;running.current=true;setBusy(true);setError('');setNotice('');try{await action()}catch(e){setError(e instanceof Error?e.message:'処理できませんでした')}finally{running.current=false;setBusy(false)}}
+  async function run(action:()=>Promise<void>,sessionAuth=true){if(running.current)return;running.current=true;setBusy(true);setError('');setNotice('');try{await action()}catch(e){if(persistent&&sessionAuth&&e instanceof CloudError&&e.status===401){setConnected(false);setHistory([]);setCursor(null);setSessions(null)}setError(e instanceof Error?e.message:'処理できませんでした')}finally{running.current=false;setBusy(false)}}
   function send(){
     if(blocked)return;
     if(connected){void run(backup);return;}
     setError('');setNotice('復旧キーで接続してから「クラウドへ送信」を押してください。');
     if(settingsRef.current)settingsRef.current.open=true;
-    requestAnimationFrame(()=>{const field=url.trim()?tokenRef.current:urlRef.current;field?.focus();field?.scrollIntoView({block:'center',behavior:'smooth'})});
+    requestAnimationFrame(()=>{const field=persistent||url.trim()?tokenRef.current:urlRef.current;field?.focus();field?.scrollIntoView({block:'center',behavior:'smooth'})});
   }
   async function refresh(more=false){const result=await listBackups(connection(),more?cursor:null);setHistory(old=>more?[...old,...result.backups]:result.backups);setCursor(result.next_cursor)}
-  function forget(){setToken('');setConnected(false);setHistory([]);setCursor(null);setPending(null);setRetry(null);setNotice('復旧キーをこの画面のメモリーから消しました')}
-  async function connect(){await refresh();const id=deviceId||crypto.randomUUID();await saveCloudSettings({url:url.trim(),deviceId:id});setDeviceId(id);setConnected(true);setNotice('接続を確認しました。記録は端末に保存したままです')}
+  function forget(){setToken('');setSessions(null);if(!persistent){setConnected(false);setHistory([]);setCursor(null);setPending(null);setRetry(null)}setNotice('復旧キーをこの画面のメモリーから消しました')}
+  async function connect(){if(persistent){await login(token.trim(),deviceName.trim());setToken('');setSessions(null);setConnected(true)}await refresh();const id=deviceId||crypto.randomUUID();await saveCloudSettings({url:url.trim(),deviceId:id});setDeviceId(id);setConnected(true);setNotice(persistent?'この端末のログインを保持しました。次回は復旧キーの入力なしで送信できます':'接続を確認しました。記録は端末に保存したままです')}
+  async function checkSession(){const s=await sessionStatus();setConnected(true);setDeviceName(s.deviceName);await refresh();setNotice('ログイン状態を確認しました')}
+  async function disconnect(){await logout();setConnected(false);setToken('');setSessions(null);setHistory([]);setCursor(null);setNotice('この端末のログインを解除しました。端末内の記録は残っています')}
+  async function devices(){const result=await listSessions(token.trim());setSessions(result);setNotice('本人確認が完了しました。端末を選んでログインを解除できます')}
+  async function revoke(id?:string){if(!confirm(id?'この端末のクラウドへのアクセスを解除しますか？端末内の記録は消えません。':'このカラオケアプリの全端末のログインを解除しますか？端末内とクラウドの記録は消えません。'))return;await run(async()=>{await revokeSession(token.trim(),id);setSessions(await listSessions(token.trim()));try{await sessionStatus()}catch(e){if(e instanceof CloudError&&e.status===401){setConnected(false);setHistory([]);setCursor(null)}else throw e}setNotice('ログインを解除しました。解除された端末は、次の通信から復旧キーでの再接続が必要です')},false)}
   async function backup(){
     const captured=await captureSnapshot();
     const candidate=retry??await createBackup(captured,deviceId||null);setRetry(candidate);
@@ -46,10 +54,11 @@ export default function CloudBackups({local,disabled,onSaved,onRestored}:{local:
   async function inspect(file?:File){if(!file)return;await run(async()=>{if(file.size>17*1024*1024)throw Error('クラウド用JSONは17MBまでです');const backup=JSON.parse(await file.text());await validateBackup(backup);const current=await captureSnapshot();setPending({backup,revision:current.state.revision,currentCount:current.state.songs.length})})}
   const lastSent=local?.cloudBackup?.sentAt??local?.cloudBackup?.createdAt;
   return <>
+    {!persistent&&<aside className="cloudMigration"><strong>ログインを保持できる専用アドレスができました</strong><p>① この端末で移行用JSONを保存 → ② <a href={CLOUD_ORIGIN} target="_blank" rel="noopener">新しいうたログを開く</a> → ③ 復旧キーで初回ログイン → ④ JSONを選び、内容を確認して復元。今の記録はこのアドレスにも残ります。</p><button className="outlineButton" disabled={blocked} onClick={()=>run(json)}>移行用の全データJSONを保存</button></aside>}
     <section className="cloudQuick" aria-label="クラウド送信" aria-busy={busy}>
       <div className="cloudQuickRow">
         <button type="button" className="cloudSendButton" disabled={blocked} onClick={send}>{busy?'処理中…':retry?'クラウド送信を再試行':'クラウドへ送信'}</button>
-        <div className="cloudSendStatus"><span>前回のクラウド送信</span><strong>{lastSent?<time dateTime={lastSent}>{stamp(lastSent)}</time>:'まだ送信していません'}</strong><small>未送信の変更：{changes}件{connected?' ・ 接続済み':''}</small></div>
+        <div className="cloudSendStatus"><span>前回のクラウド送信</span><strong>{lastSent?<time dateTime={lastSent}>{stamp(lastSent)}</time>:'まだ送信していません'}</strong><small>未送信の変更：{changes}件{connected?' ・ '+(persistent?'ログイン保持中':'接続済み'):' ・ '+(persistent?'初回ログイン・再接続が必要':'未接続')}</small></div>
       </div>
       {error&&<p className="error" role="alert">{error}</p>}{notice&&<p className="notice" role="status">{notice}</p>}
     </section>
@@ -60,10 +69,13 @@ export default function CloudBackups({local,disabled,onSaved,onRestored}:{local:
     <p>普段の記録はこの端末に保存します。クラウドへは操作したときに履歴を追加します。</p>
     <p>前回のクラウド送信：{lastSent?stamp(lastSent):'まだ送信していません'}<br/>未送信の変更：{changes}件。入力途中の内容は「記録する」で保存してから送信してください。</p>
     {changes>=15&&<p className="backupNotice" role="status">15件以上の変更があります。クラウドにもバックアップを保存してください。</p>}
-    <p className="cloudHint">復旧キーは、ブラウザが消えても使えるように別の安全な場所で保管してください。画面を閉じると再入力が必要です。</p>
-    <div className="cloudFields"><label>バックアップ先のWorker URL<input ref={urlRef} type="url" value={url} disabled={busy||connected} placeholder="https://…workers.dev" onChange={e=>setUrl(e.target.value)} /></label>
-    <label>バックアップ用の復旧キー<input ref={tokenRef} type="password" value={token} autoComplete="off" spellCheck={false} disabled={busy||connected} onChange={e=>setToken(e.target.value)} /></label></div>
-    <div className="backupActions"><button className="outlineButton" disabled={blocked||connected} onClick={()=>run(connect)}>接続を確認</button><button className="outlineButton" disabled={busy} onClick={forget}>復旧キーを画面から消す</button><button className="outlineButton" disabled={blocked} onClick={()=>run(json)}>全データJSONを作成</button></div>
+    <p className="cloudHint">{persistent?'初回ログイン後は、この端末だけの通行証でログインを保持します。サーバー側の自動期限はありません。ブラウザのデータ消去や端末の解除後は復旧キーで再接続します。復旧キーは別の安全な場所で保管してください。':'復旧キーは別の安全な場所で保管してください。この旧アドレスでは画面を閉じると再入力が必要です。'}</p>
+    {persistent&&<p>旧アドレスの記録を移すときは、移行用の全データJSONを保存し、初回ログイン後に下の「全データJSONの復元内容を確認」から選んで復元してください。クラウドに送信済みなら、履歴からの復元もできます。</p>}
+    <div className="cloudFields">{!persistent&&<label>バックアップ先のWorker URL<input ref={urlRef} type="url" value={url} disabled={busy||connected} placeholder="https://…workers.dev" onChange={e=>setUrl(e.target.value)} /></label>}
+    {persistent&&<label>この端末の名前<input value={deviceName} maxLength={80} disabled={busy||connected} onChange={e=>setDeviceName(e.target.value)} placeholder="例：優のiPhone" /></label>}
+    <label>{persistent?'復旧キー（初回ログイン・端末管理の本人確認）':'バックアップ用の復旧キー'}<input ref={tokenRef} type="password" value={token} autoComplete="off" spellCheck={false} disabled={busy||(!persistent&&connected)} onChange={e=>{setToken(e.target.value);setSessions(null)}} /></label></div>
+    <div className="backupActions"><button className="outlineButton" disabled={blocked||connected} onClick={()=>run(connect)}>{persistent?'この端末でログインを保持':'接続を確認'}</button>{persistent&&<button className="outlineButton" disabled={blocked} onClick={()=>run(checkSession)}>ログイン状態を確認</button>}<button className="outlineButton" disabled={busy} onClick={forget}>復旧キーを画面から消す</button><button className="outlineButton" disabled={blocked} onClick={()=>run(json)}>全データJSONを作成</button>{persistent&&connected&&<button className="outlineButton" disabled={busy} onClick={()=>run(disconnect)}>この端末のログインを解除</button>}</div>
+    {persistent&&<section className="deviceManager"><h3>ログイン中の端末を管理</h3><p>復旧キーを上の欄に入力して本人確認すると、このカラオケアプリだけの端末一覧を確認・解除できます。操作後は「復旧キーを画面から消す」を押してください。</p><button className="outlineButton" disabled={blocked||!token.trim()} onClick={()=>run(devices,false)}>本人確認して端末一覧を表示</button>{sessions&&<><ul className="cloudHistory">{sessions.map(s=><li key={s.id}><span><strong>{s.deviceName}{s.current?'（この端末）':''}</strong><br/>初回ログイン：{stamp(s.createdAt)}<br/>最終利用：{stamp(s.lastUsedAt)}</span><button className="outlineButton" disabled={busy} onClick={()=>revoke(s.id)}>この端末を解除</button></li>)}</ul>{sessions.length===0?<p>ログイン中の端末はありません。</p>:<button className="outlineButton" disabled={busy} onClick={()=>revoke()}>このアプリの全端末を解除</button>}</>}</section>}
     {connected&&<div className="backupActions"><button className="outlineButton" disabled={blocked} onClick={send}>{retry?'クラウド送信を再試行':'クラウドへ送信'}</button><button className="outlineButton" disabled={blocked} onClick={()=>run(()=>refresh())}>履歴を更新</button></div>}
     {retry&&<p>通信結果が未確認のバックアップを保持しています。再試行は同じIDで行い、重複や上書きを防ぎます。{local&&local.revision!==retry.source_revision?'その後の変更は、再試行成功後にもう一度保存してください。':''}</p>}
     {connected&&<ul className="cloudHistory">{history.map(b=><li key={b.backup_id}><span>{stamp(b.created_at)}・{b.record_count}件</span><button className="outlineButton" disabled={blocked} onClick={()=>run(()=>preview(b.backup_id))}>復元内容を確認</button></li>)}</ul>}

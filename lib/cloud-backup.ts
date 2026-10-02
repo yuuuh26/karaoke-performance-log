@@ -1,18 +1,20 @@
 import {createBackup,validateBackup,type Backup,type BackupSummary,type Snapshot} from './snapshot';
-export type CloudConnection={url:string;token:string};
+import {CLOUD_ORIGIN,hosted,CloudError} from './cloud-auth';
+export type CloudConnection={url:string;token?:string};
 function endpoint(connection:CloudConnection,path:string) {
   const url=new URL(connection.url);
   if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash||url.pathname!=='/' ||
     !url.hostname.endsWith('.workers.dev'))throw Error('バックアップ先にはHTTPSのWorker URLを指定してください');
-  if(!/^[A-Za-z0-9_-]{43,128}$/.test(connection.token))throw Error('バックアップ用の復旧キーを確認してください');
+  if(connection.token===undefined){if(url.origin!==CLOUD_ORIGIN||!hosted())throw Error('カラオケ専用アドレスでログインしてください')}
+  else if(!/^[A-Za-z0-9_-]{43,128}$/.test(connection.token))throw Error('バックアップ用の復旧キーを確認してください');
   return new URL(path,url).href;
 }
 async function request(connection:CloudConnection,path:string,method='GET',body?:unknown) {
-  const response=await fetch(endpoint(connection,path),{method,mode:'cors',credentials:'omit',cache:'no-store',
+  const response=await fetch(endpoint(connection,path),{method,mode:'cors',credentials:connection.token===undefined?'same-origin':'omit',cache:'no-store',
     redirect:'error',signal:AbortSignal.timeout(30000),
-    headers:{Authorization:`Bearer ${connection.token}`,...(body?{'Content-Type':'application/json'}:{})},
+    headers:{...(connection.token?{Authorization:`Bearer ${connection.token}`} :{}),...(body?{'Content-Type':'application/json'}:{})},
     ...(body?{body:JSON.stringify(body)}:{})});
-  if(!response.ok)throw Error(`クラウドへの通信に失敗しました（${response.status}）。端末の記録は変更していません`);
+  if(!response.ok)throw new CloudError(response.status,`クラウドへの通信に失敗しました（${response.status}）。端末の記録は変更していません${response.status===401?'。ログイン状態を確認してください':''}`);
   return response.json();
 }
 // Retry this same Backup object after an interrupted upload. A new identifier
