@@ -1,4 +1,7 @@
 node_modules/
 dist/
 .test-build/
+.test-snapshots/
+.test-worker/
+cloudflare/dist/
 *.log

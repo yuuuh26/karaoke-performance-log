@@ -2,6 +2,8 @@ name: Verify Pages build
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,9 +14,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: node cloudflare/build.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-backup-build
+          path: |
+            dist
+            cloudflare/dist
+          retention-days: 7
       - run: git diff --exit-code -- assets icon-180.png icon-192.png icon-512.png manifest.webmanifest sw.js
