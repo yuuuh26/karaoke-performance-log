@@ -4,6 +4,7 @@ import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState 
 
 import { type Song, type Machine, type Tag, type Records, buildSongIndex, suggest, sorted, markdown } from "../lib/records";
 import { type LocalState, readLocal, initializeLocal, saveRecords, markExport, milestone, backupText, parseBackup, restoreRecords, recoveryBackup } from "../lib/local-store";
+import CloudBackups from './cloud-backups';
 
 type SongForm = {
   title: string; artist: string; releaseYear: string; sungAt: string; key: string; score: string;
@@ -232,6 +233,7 @@ export default function Home() {
       {pending&&<div className="restorePanel"><strong>取り込み内容：歌唱記録 {pending.records.songs.length}件</strong><p>タグ {pending.records.tags.length}件 ／ 採点機 {pending.records.machines.length}件</p><p>現在の{songs.length}件を、このファイルの内容で置き換えます。同じファイルを再度取り込んでも重複しません。</p><div className="backupActions"><button className="outlineButton" disabled={saving} onClick={restore}>この内容で復元</button><button className="outlineButton" onClick={()=>setPending(null)}>キャンセル</button></div></div>}
       <p>最終取り込み：{local?.lastImportAt?toLocalInput(local.lastImportAt).replace('T',' ')+' JST':'未実施'}</p>
     </details>
+    <CloudBackups local={local} disabled={loading||saving||exporting} onSaved={adopt} onRestored={state=>{adopt(state);setForm({...emptyForm(),machine:state.lastMachine});setEditingId(null);setAutoFilledFrom(null);setPending(null)}} />
     <footer className="creatorMark" aria-label="YUUが作成"><span>YUU</span><small>MADE THIS</small></footer>
   </main>;
 }
