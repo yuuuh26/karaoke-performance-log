@@ -42,7 +42,10 @@ test('意味のある記録だけを数え、出力や並び替え・選択状�
   const captured=await local.captureSnapshot(),b=await snapshot.createBackup(captured);
   s=await local.saveRecords({...s,songs:s.songs.map((r,i)=>i===0?{...r,memo:'重要な編集'}:r)},s.revision);
   assert.equal(s.importantChanges,first+1);
-  s=await local.markCloudBackup(b,captured.state.importantChanges??0);
+  const sentAfter=Date.now();
+  s=await local.markCloudBackup({...b,created_at:'2020-01-01T00:00:00.000Z'},captured.state.importantChanges??0);
+  assert.ok(Date.parse(s.cloudBackup.sentAt)>=sentAfter,'前回送信日時は古いスナップショット作成日時ではなく、保存確認時刻');
+  assert.equal((await local.readLocal()).cloudBackup.sentAt,s.cloudBackup.sentAt,'再起動後も送信日時を保持');
   assert.equal(s.importantChanges-s.cloudBackup.backedUpChanges,1,'出力中の新しい変更を未バックアップとして残す');
 });
 test('クラウド復元は退避・読み戻しが成功するまで置き換えず、途中の編集も維持する',async()=>{

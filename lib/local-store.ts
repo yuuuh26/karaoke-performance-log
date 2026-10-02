@@ -1,6 +1,6 @@
 import {type Records,validateRecords} from './records';
 import {parseSnapshot,type Snapshot} from './snapshot';
-export type LocalState=Records & {revision:number;lastSavedAt:string;lastMachine:string;peakCount:number;readMilestone:number;jsonMilestone:number;lastImportAt?:string;importantChanges?:number;cloudBackup?:{backupId:string;createdAt:string;backedUpChanges:number}};
+export type LocalState=Records & {revision:number;lastSavedAt:string;lastMachine:string;peakCount:number;readMilestone:number;jsonMilestone:number;lastImportAt?:string;importantChanges?:number;cloudBackup?:{backupId:string;createdAt:string;sentAt?:string;backedUpChanges:number}};
 export const DB_NAME='yuu-karaoke-performance-log-v1';
 async function openDB():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>{r.result.createObjectStore('state');r.result.createObjectStore('recovery');};r.onsuccess=()=>{r.result.onversionchange=()=>r.result.close();resolve(r.result)};r.onerror=()=>reject(r.error);r.onblocked=()=>reject(Error('別のタブを閉じてください'));});}
 export async function readLocal():Promise<LocalState|undefined>{const db=await openDB();return new Promise((resolve,reject)=>{const tx=db.transaction('state'),r=tx.objectStore('state').get('current');tx.oncomplete=()=>{db.close();try{if(r.result)validateRecords(r.result);resolve(r.result)}catch(e){reject(e)}};tx.onerror=()=>{db.close();reject(tx.error)}})}
@@ -66,7 +66,7 @@ export async function markCloudBackup(backup:{backup_id:string;created_at:string
   return changeLocal(s=>{
     if(backup.source_revision>s.revision||capturedChanges>(s.importantChanges??0))throw Error('バックアップの保存情報が一致しません');
     if(s.cloudBackup&&s.cloudBackup.backedUpChanges>capturedChanges)return s;
-    return {...s,cloudBackup:{backupId:backup.backup_id,createdAt:backup.created_at,backedUpChanges:capturedChanges}};
+    return {...s,cloudBackup:{backupId:backup.backup_id,createdAt:backup.created_at,sentAt:new Date().toISOString(),backedUpChanges:capturedChanges}};
   });
 }
 export type CloudSettings={url:string;deviceId:string};
