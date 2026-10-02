@@ -12,7 +12,7 @@ export async function restoreFromCloud(connection:CloudConnection,backup:Backup,
   const protectedBackup=await uploadBackup(connection,await createBackup(current));
   // A round trip of the complete pre-restore snapshot is required, including
   // tags, machines, settings, and the previous local recovery copy.
-  const restored=await restoreSnapshot(source,expectedRevision,{backupId:protectedBackup.backup_id,createdAt:protectedBackup.created_at,backedUpChanges:current.state.importantChanges??0});
+  const restored=await restoreSnapshot(source,expectedRevision,{backupId:protectedBackup.backup_id,createdAt:protectedBackup.created_at,sentAt:new Date().toISOString(),backedUpChanges:current.state.importantChanges??0});
   const checked=await readLocal();
   if(!checked||JSON.stringify(checked)!==JSON.stringify(restored))throw Error('復元後の照合に失敗しました。復元前のクラウド履歴と端末の退避データを保持しています');
   return {state:restored,protectedBackupId:protectedBackup.backup_id};

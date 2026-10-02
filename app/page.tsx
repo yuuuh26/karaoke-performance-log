@@ -183,6 +183,7 @@ export default function Home() {
 
   return <main className="appShell">
     <header><h1>うたログ</h1><div className="headerStats"><strong>今日 {todayCount}曲</strong><span>全{songs.length}曲</span></div></header>
+    <CloudBackups local={local} disabled={loading||saving||exporting} onSaved={adopt} onRestored={state=>{adopt(state);setForm({...emptyForm(),machine:state.lastMachine});setEditingId(null);setAutoFilledFrom(null);setPending(null)}} />
     {error&&<p className="error" role="alert">{error}</p>}
     {message&&<p className="notice" role="status">{message}</p>}
     {showReminder&&<aside className="backupNotice" role="status"><strong>バックアップを取ってください（{level}件の節目）</strong><div>閲覧用出力：{local!.readMilestone>=level?'完了 ✓':'未完了'} ／ JSONバックアップ：{local!.jsonMilestone>=level?'完了 ✓':'未完了'}</div><div className="backupActions"><button className="outlineButton" onClick={()=>copyAll(true)}>全件コピー</button><button className="outlineButton" onClick={()=>downloadMarkdown(true)}>全件Markdown保存</button><button className="outlineButton" onClick={downloadBackup}>JSONバックアップ保存</button></div><small>コピーかMarkdownのどちらかと、JSON保存の両方で通知が消えます。</small></aside>}
@@ -233,7 +234,6 @@ export default function Home() {
       {pending&&<div className="restorePanel"><strong>取り込み内容：歌唱記録 {pending.records.songs.length}件</strong><p>タグ {pending.records.tags.length}件 ／ 採点機 {pending.records.machines.length}件</p><p>現在の{songs.length}件を、このファイルの内容で置き換えます。同じファイルを再度取り込んでも重複しません。</p><div className="backupActions"><button className="outlineButton" disabled={saving} onClick={restore}>この内容で復元</button><button className="outlineButton" onClick={()=>setPending(null)}>キャンセル</button></div></div>}
       <p>最終取り込み：{local?.lastImportAt?toLocalInput(local.lastImportAt).replace('T',' ')+' JST':'未実施'}</p>
     </details>
-    <CloudBackups local={local} disabled={loading||saving||exporting} onSaved={adopt} onRestored={state=>{adopt(state);setForm({...emptyForm(),machine:state.lastMachine});setEditingId(null);setAutoFilledFrom(null);setPending(null)}} />
     <footer className="creatorMark" aria-label="YUUが作成"><span>YUU</span><small>MADE THIS</small></footer>
   </main>;
 }
