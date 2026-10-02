@@ -20,6 +20,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: node cloudflare/build.mjs
+      - run: node cloudflare/site-build.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: verified-backup-build

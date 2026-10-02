@@ -1,43 +1,64 @@
-# 外部スナップショットバックアップ
+# カラオケ専用Cloudflareアプリとバックアップ
 
-このディレクトリーは専用の新規Worker・D1向けです。既存Worker・D1に適用しないでください。
-2026年10月2日に専用資源を作成し、配備と架空データの保存・読み戻しを確認しました。
+フロントエンドとAPIを同じカラオケ専用オリジンで配信します。他アプリにはこのWorker、D1、復旧キーを使い回しません。
 
-- D1: `karaoke-performance-log-backups`
-- D1 ID: `e80ea322-0d84-46af-b213-a8a1676e2109`
+- アプリ: https://karaoke-performance-log-backups.dengana-10011212.workers.dev/
 - Worker: `karaoke-performance-log-backups`
-- URL: `https://karaoke-performance-log-backups.dengana-10011212.workers.dev`
+- D1: `karaoke-performance-log-backups` (`e80ea322-0d84-46af-b213-a8a1676e2109`)
 - binding: `DB` → 上記D1
-- Secret: `BACKUP_TOKEN_SHA256`（復旧キーのハッシュのみ）
+- Secret: `BACKUP_TOKEN_SHA256`（復旧キーのSHA-256のみ）
 
-アプリのクラウドバックアップ欄へ上記URLと別途安全に保管した復旧キーを入力します。キー本文はこのリポジトリにはありません。初回は本人の端末から全件を保存し、保存と読み戻しの成功表示を確認してください。その操作が済むまで実記録のクラウド保全は未完了です。
+公開アプリのURLとAPIのURLは秘密ではありません。本人のクラウド履歴の保存・一覧・復元には有効な端末Cookie、または元の復旧キーが必要です。アプリのURLだけを知る人は、自分のブラウザ内の記録機能は使えますが、本人のクラウドへはアクセスできません。秘密キーやCloudflareの管理API Tokenは公開コードに含めません。
 
-基盤検証で作成した約960KB・1件の架空スナップショットが2履歴あります。実ユーザーデータではありません。履歴IDは `f4f74faa-6e96-4524-a8fb-83ea29cf738d` と `5321b2e7-88a9-4d72-9c4b-fc133bea8537` です。
+## 認証
+
+- `POST /v1/session`: 復旧キーで本人確認し、暗号学的乱数32バイトの新しい端末通行証を発行。既存の同端末Cookieがあれば、その通行証だけを原子的に解除・交換します。
+- `GET /v1/session`: 保持しているCookieの接続状態を確認。
+- `POST /v1/session/logout`: この端末だけを解除し、Cookieを削除。
+- `POST /v1/sessions`: 復旧キーで再確認して、ログイン中の端末名・初回日時・最終利用・この端末かどうかを表示。
+- `POST /v1/sessions/revoke`: 復旧キーで再確認し、`sessionId` の端末だけ、または `all:true` で全端末を解除。
+
+端末Cookieは `__Host-karaoke-session`、`Secure; HttpOnly; SameSite=Strict; Path=/` で、Domain属性を指定しません。通常のフロントエンドJavaScriptから値を読み出せず、別アプリのホストには送信されません。D1には通行証のハッシュだけを保存し、各要求でapp_idと未解除の状態を確認します。Cookieを他アプリの認証として扱うこともありません。
+
+サーバー側には固定期限・無操作期限を設けません。ブラウザ側のCookieは最大400日の指定をし、認証成功時に更新します。ブラウザのデータ消去・保持制限・プライベートモード・Cookie削除では再ログインが必要です。アプリの表示だけではCookieの有効性を保証せず、通信ごとにDBで解除状態を確認します。
+
+ログイン、ログアウト、端末管理、Cookieでの保存は正確に同じOriginからだけ受け付けます。Sec-Fetch-Siteが同一オリジン以外ならCookie要求を拒否します。API結果はno-store、Service Workerは指定した静的ファイルだけをキャッシュし、APIや認証結果をキャッシュしません。旧GitHub Pagesからの保存は元のBearer認証を継続し、Cookieでのクロスオリジンアクセスは許可しません。
+
+復旧キーは入力中のメモリーにだけ保持し、初回ログイン成功時に消します。管理操作では「復旧キーを画面から消す」で消去します。端末解除は通行証を無効化します。復旧キー自体が漏れた場合は、復旧キーの変更と全端末解除が別途必要です。Cloudflare管理権限や同一オリジン内のコード侵害まで防ぐものではありません。
+
+## 既存データの移行
+
+保存領域はOriginごとに分かれます。本人のスマホ内のIndexedDBは別アドレスへ自動転送しません。
+
+1. 旧GitHub Pagesを普段のブラウザで開き、「移行用の全データJSONを保存」でファイルを保存します。復旧キーの入力は不要です。
+2. 新アプリを開き、端末名と保管した復旧キーで初回ログインします。
+3. 接続設定内の「全データJSONの復元内容を確認」でファイルを選び、日時・件数を確認します。
+4. 「確認してこの日時に復元」を押し、確認ダイアログで復元します。新アドレスに既にある記録も、クラウドへの退避・読み戻し照合を成功させてから置き換えます。
+5. 件数と記録を確認します。旧アドレスの記録はそのまま残ります。クラウドに送信済みなら履歴からも復元できます。
+
+JSONに曲、追加項目、タグ、採点機、設定、端末内の復元前退避を含めます。秘密キーは含めません。JSONファイルをこの公開リポジトリへアップロードしないでください。記録の移行と実データの初回送信は本人の端末で行います。
 
 ## 配備
 
-1. OAuthを対象の1アカウントに制限し、D1 Write・Workers Scripts Write・Workers Scripts Bindだけを認可します。必須Background Access・User Readを含め5権限です。
-2. 同名の資源がないことを読み取りで確認し、専用D1を新規作成します。初期化・削除は行いません。
-3. 新規D1に `migrations/0001_backups.sql` を1回適用します。
-4. 暗号学的乱数32バイト以上からbase64urlのアプリ専用復旧キーを生成します。管理API Tokenとは別です。平文キーはGitHubやチャットに入れず、利用者の安全な復旧情報に保存します。
-5. 復旧キーのSHA-256をWorker Secret `BACKUP_TOKEN_SHA256` に保存します。D1を `DB` bindingとして接続します。
-6. `node cloudflare/build.mjs` で作成したモジュールを新規Workerへ配備し、workers.devのHTTPS URLを確認します。カスタムドメイン・DNS・Routesは不要です。
-7. 認証なし・誤ったキー・他オリジンを拒否することを実環境でも確認し、架空のデータで保存・履歴・読み戻しを試します。実記録はアプリのバックアップ操作からだけ送ります。
+既存のこのカラオケ専用Worker・D1だけに適用します。他の資源に適用しません。
 
-Worker APIは `PUT /v1/backups/:backup_id`、`GET /v1/backups`、`GET /v1/backups/:backup_id` です。Authorization Bearerのアプリ復旧キーが必要で、CORSは `https://yuuuh26.github.io` だけを許可します。すべての返答をno-storeとし、削除・更新APIを設けません。
+1. 新設時だけ `migrations/0001_backups.sql` を適用し、専用復旧キーのハッシュをWorker Secretに保存します。既存のバックアップDBは初期化しません。
+2. `migrations/0002_sessions.sql` を専用D1に追加適用します。既存のバックアップ表・チャンク・更新削除拒否トリガーを変更しません。
+3. `npm ci && npm test && npm run build`、`node cloudflare/build.mjs`、`node cloudflare/site-build.mjs`。
+4. `cloudflare/dist/site-worker.js` をES Modules Workerとして同じWorkerへ配備します。metadataのmain_moduleをアップロードのファイル名に指定し、`DB` bindingと `keep_bindings:["secret_text"]` で既存Secretを保持します。Secretの平文を読んだり再生成したりしません。
+5. 正常な静的配信、無認証・誤ったキーの拒否を公開先で確認します。認証・保存・復元・解除の機能テストは架空IndexedDBとインメモリーSQLiteで行い、本人の履歴を読み書きしません。
+
+APIだけの `cloudflare/dist/worker.js` は互換検証用です。新アドレスへの配備にはフロントエンドを含む `site-worker.js` を使用します。フロントエンド更新時も両方ビルドし、Service WorkerのキャッシュとHTMLのバージョンを変更します。公開APIパス以外にはビルドした静的ファイルだけを配信し、WorkerのソースやSecretを返しません。
 
 ## 保存と復元
 
-- 既存IndexedDBの名前・バージョン・保存場所は変えません。state/currentとrecovery/before-import、保存済みの公開クラウド設定を1つのreadonly transactionで読み出します。秘密キーはメモリーにだけ保持します。
-- backup_id、app_id、schema_version、created_at、device_id、record_count、source_revision、sha256、byte_lengthを保存します。record_countは曲数です。タグ・採点機・設定・元の追加項目・退避データもJSONに含みます。
-- D1の行サイズ制限に備え、backup_jsonをbackup_chunksに順序付きで保存します。メタデータと全チャンクを1回のD1 batchで原子的に追加します。読み戻しで全JSONのSHA-256・サイズ・件数を照合します。
-- JSON本体は8MBまでです。17MBまでのリクエストを受け付けます。履歴は削除せず、50件ずつ過去へ一覧表示します。容量不足は保存失敗として伝え、端末を変更しません。
-- 復元はユーザーが内容を確認したときだけ行います。現在の全データを別のクラウド履歴へ退避し、読み戻しを照合できるまで置き換えません。更新revisionが変われば中止します。置き換えと端末内の直前退避は同じtransactionです。
-- 履歴のcloud_settingsは復旧時の参考情報です。復元で接続先や端末IDを自動的に変更しません。復旧キーが別のサーバーへ送信されるのを避けます。
-- 曲・タグ・採点機の追加・編集・削除を件数として数えます。UI選択・検索・出力・曲の並び替えは数えません。15件で通知します。バックアップ中の追加編集は未バックアップとして残します。
-
-既存の端末JSON機能は継続できます。新しい全データJSONはクラウドバックアップ画面で扱います。ブラウザが消えた場合は、アプリを開き、保管したWorker URLと復旧キーを入力して接続し、履歴の日時・件数を確認して復元してください。
+- `PUT /v1/backups/:backup_id`、`GET /v1/backups`、`GET /v1/backups/:backup_id`。バックアップ更新・削除APIはありません。
+- 送信ボタンの操作で全件を保存し、読み戻してJSON・SHA-256・サイズ・件数を照合後に前回送信日時を更新します。通信失敗時は端末内の記録を保持します。
+- 一つの全JSONは8MBまで。D1の行上限に合わせて順序付きチャンクに分割し、メタデータと全チャンクをD1 batchで原子的に追加します。同じIDの同じ内容は再試行可能、異なる内容の上書きは拒否します。
+- 復元は内容確認と明示的な承認後だけ。現状を別のクラウド履歴に退避・読み戻し照合し、確認中にrevisionが変われば中止します。端末内の置き換えと復元前の退避も同じtransactionです。
+- スナップショットに含まれる公開接続設定は参考情報で、復元で接続先を自動変更しません。
+- 端末の解除はログインだけに作用し、端末記録とクラウド履歴を削除しません。
 
 ## 検証
 
-`npm test` は架空のIndexedDBとインメモリーSQLiteで検証します。実ユーザーデータや実D1にアクセスしません。`npm run build` の生成物もコミットし、PRのGitHub Actionsでテストとビルド一致を確認します。
+`npm test` は認証・同一オリジン制限・端末単位の解除・全解除・再認証の原子性・Cookieの秘密属性・アプリ制限・期限なし・従来Bearer互換に加え、既存の保存・復元・失敗時のデータ保持を検証します。GitHub Actionsでテスト・両Workerのビルド・Pages生成物の一致を確認します。
