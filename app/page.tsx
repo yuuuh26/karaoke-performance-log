@@ -5,6 +5,7 @@ import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState 
 import { type Song, type Machine, type Tag, type Records, buildSongIndex, suggest, sorted, markdown } from "../lib/records";
 import { type LocalState, readLocal, initializeLocal, saveRecords, markExport, milestone, backupText, parseBackup, restoreRecords, recoveryBackup } from "../lib/local-store";
 import CloudBackups from './cloud-backups';
+import {CLOUD_ORIGIN,hosted} from '../lib/cloud-auth';
 
 type SongForm = {
   title: string; artist: string; releaseYear: string; sungAt: string; key: string; score: string;
@@ -48,6 +49,8 @@ function Rating({ label, value, onChange }: { label:string; value:number | null;
 }
 
 export default function Home() {
+  const appUrl=hosted()?CLOUD_ORIGIN+'/':'https://yuuuh26.github.io/karaoke-performance-log/';
+  const [cloudTopTarget,setCloudTopTarget]=useState<HTMLDivElement|null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -183,7 +186,7 @@ export default function Home() {
 
   return <main className="appShell">
     <header><h1>うたログ</h1><div className="headerStats"><strong>今日 {todayCount}曲</strong><span>全{songs.length}曲</span></div></header>
-    <CloudBackups local={local} disabled={loading||saving||exporting} onSaved={adopt} onRestored={state=>{adopt(state);setForm({...emptyForm(),machine:state.lastMachine});setEditingId(null);setAutoFilledFrom(null);setPending(null)}} />
+    <div className="cloudTopSlot" ref={setCloudTopTarget} />
     {error&&<p className="error" role="alert">{error}</p>}
     {message&&<p className="notice" role="status">{message}</p>}
     {showReminder&&<aside className="backupNotice" role="status"><strong>バックアップを取ってください（{level}件の節目）</strong><div>閲覧用出力：{local!.readMilestone>=level?'完了 ✓':'未完了'} ／ JSONバックアップ：{local!.jsonMilestone>=level?'完了 ✓':'未完了'}</div><div className="backupActions"><button className="outlineButton" onClick={()=>copyAll(true)}>全件コピー</button><button className="outlineButton" onClick={()=>downloadMarkdown(true)}>全件Markdown保存</button><button className="outlineButton" onClick={downloadBackup}>JSONバックアップ保存</button></div><small>コピーかMarkdownのどちらかと、JSON保存の両方で通知が消えます。</small></aside>}
@@ -222,8 +225,9 @@ export default function Home() {
       {historyView}
     </section>
     {filtered.length>visibleCount && <button type="button" className="outlineButton" onClick={()=>setVisibleCount(n=>n+50)}>さらに50件表示（表示中 {Math.min(visibleCount,filtered.length)} / {filtered.length}件）</button>}
+    <CloudBackups topTarget={cloudTopTarget} local={local} disabled={loading||saving||exporting} onSaved={adopt} onRestored={state=>{adopt(state);setForm({...emptyForm(),machine:state.lastMachine});setEditingId(null);setAutoFilledFrom(null);setPending(null)}} />
     <details className="dataManager"><summary>設定・データ管理</summary>
-      <div className="appUrlRow"><span>アプリURL</span><code>https://yuuuh26.github.io/karaoke-performance-log/</code><button type="button" className="outlineButton" onClick={()=>copy("https://yuuuh26.github.io/karaoke-performance-log/","app-url")}>{copied==="app-url" ? "コピー済み":"URLをコピー"}</button></div>
+      <div className="appUrlRow"><span>アプリURL</span><code>{appUrl}</code><button type="button" className="outlineButton" onClick={()=>copy(appUrl,"app-url")}>{copied==="app-url" ? "コピー済み":"URLをコピー"}</button></div>
       <p>端末の記録：{songs.length}件</p>
       <p>記録データの概算：{sizeKB} KB（JSONのUTF-8サイズ。IndexedDB全体の占有量ではありません）</p>
       <p>最終端末保存：{local?.lastSavedAt ? toLocalInput(local.lastSavedAt).replace('T',' ')+' JST':'未保存'}</p>

@@ -1,6 +1,6 @@
-const CACHE='yuu-karaoke-performance-log-v7';
+const CACHE='yuu-karaoke-performance-log-v8';
 const BASE=new URL('./',self.location.href);
-const ASSETS=['./','./index.html','./update.html','./assets/app.js','./assets/app.css','./assets/app.js?v=20261003-device-login','./assets/app.css?v=20261003-device-login','./icon-192.png','./icon-512.png','./icon-180.png','./manifest.webmanifest'].map(p=>new URL(p,BASE).href);
+const ASSETS=['./','./index.html','./update.html','./assets/app.js','./assets/app.css','./assets/app.js?v=20261003-five-backups','./assets/app.css?v=20261003-five-backups','./icon-192.png','./icon-512.png','./icon-180.png','./manifest.webmanifest'].map(p=>new URL(p,BASE).href);
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS.map(url=>new Request(url,{cache:'reload'}))))));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('yuu-karaoke-performance-log-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET'||!ASSETS.includes(e.request.url))return;e.respondWith(caches.match(e.request).then(cached=>cached||fetch(e.request)));});

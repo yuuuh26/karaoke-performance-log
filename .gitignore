@@ -6,3 +6,5 @@ dist/
 cloudflare/dist/
 *.log
 .test-auth/
+
+.test-layout/

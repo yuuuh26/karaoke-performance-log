@@ -43,10 +43,11 @@ JSONに曲、追加項目、タグ、採点機、設定、端末内の復元前�
 既存のこのカラオケ専用Worker・D1だけに適用します。他の資源に適用しません。
 
 1. 新設時だけ `migrations/0001_backups.sql` を適用し、専用復旧キーのハッシュをWorker Secretに保存します。既存のバックアップDBは初期化しません。
-2. `migrations/0002_sessions.sql` を専用D1に追加適用します。既存のバックアップ表・チャンク・更新削除拒否トリガーを変更しません。
-3. `npm ci && npm test && npm run build`、`node cloudflare/build.mjs`、`node cloudflare/site-build.mjs`。
-4. `cloudflare/dist/site-worker.js` をES Modules Workerとして同じWorkerへ配備します。metadataのmain_moduleをアップロードのファイル名に指定し、`DB` bindingと `keep_bindings:["secret_text"]` で既存Secretを保持します。Secretの平文を読んだり再生成したりしません。
-5. 正常な静的配信、無認証・誤ったキーの拒否を公開先で確認します。認証・保存・復元・解除の機能テストは架空IndexedDBとインメモリーSQLiteで行い、本人の履歴を読み書きしません。
+2. `migrations/0002_sessions.sql` を専用D1に追加適用します。既存のバックアップ内容・チャンク・更新拒否トリガーを変更しません。
+3. `migrations/0003_retention.sql` を適用します。既存の履歴に保持管理情報を追加し、削除拒否トリガーを「最新5世代と未照合データを保護する」条件に変更します。移行そのものは履歴を削除しません。次の成功送信から古い履歴を整理します。
+4. `npm ci && npm test && npm run build`、`node cloudflare/build.mjs`、`node cloudflare/site-build.mjs`。
+5. `cloudflare/dist/site-worker.js` をES Modules Workerとして同じWorkerへ配備します。metadataのmain_moduleをアップロードのファイル名に指定し、`DB` bindingと `keep_bindings:["secret_text"]` で既存Secretを保持します。Secretの平文を読んだり再生成したりしません。
+6. 正常な静的配信、無認証・誤ったキーの拒否を公開先で確認します。認証・保存・復元・解除の機能テストは架空IndexedDBとインメモリーSQLiteで行い、本人の履歴を読み書きしません。
 
 APIだけの `cloudflare/dist/worker.js` は互換検証用です。新アドレスへの配備にはフロントエンドを含む `site-worker.js` を使用します。フロントエンド更新時も両方ビルドし、Service WorkerのキャッシュとHTMLのバージョンを変更します。公開APIパス以外にはビルドした静的ファイルだけを配信し、WorkerのソースやSecretを返しません。
 
@@ -62,3 +63,13 @@ APIだけの `cloudflare/dist/worker.js` は互換検証用です。新アドレ
 ## 検証
 
 `npm test` は認証・同一オリジン制限・端末単位の解除・全解除・再認証の原子性・Cookieの秘密属性・アプリ制限・期限なし・従来Bearer互換に加え、既存の保存・復元・失敗時のデータ保持を検証します。GitHub Actionsでテスト・両Workerのビルド・Pages生成物の一致を確認します。
+
+## 最新5世代の保持
+
+`backup_retention` に、確認済みの世代番号と照合日時を保存します。新しい履歴は未照合としてバックアップと同じtransactionに追加し、全JSONのDB読み戻し・形式・SHA-256・サイズ・件数照合を成功させてから、世代番号の採番・古いJSONチャンク削除・古いメタデータ削除を一つのD1 batchで実行します。Foreign keyで保持管理情報も同時に削除します。
+
+世代番号はDB内で原子的に増やします。端末時計、同一ミリ秒の送信、端末数に左右されず、確認成功順で最新5世代を残します。同じIDの再試行は元の世代を繰り返しカウントしません。端末ごとに5件ではなくカラオケアプリ全体で5件です。
+
+保存失敗なら履歴を追加・削除しません。照合失敗や整理失敗なら前の5世代と保留データを保持してエラーを返し、保留分を世代数に含めません。その場合は一時的に総行数が5件を超えます。再試行成功時に整理を再開します。旧APIとの互換性のため、この処理はPUT内部で行い、フロントエンドのGETでも従来どおり読み戻し照合します。
+
+更新拒否トリガーは継続します。削除トリガーも継続し、最新5世代・未照合データの削除はDBでも拒否します。APIに任意のDELETE操作は追加しません。Service Workerと端末IndexedDBの記録はクラウドの履歴削除に影響されません。
