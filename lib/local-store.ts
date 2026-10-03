@@ -1,5 +1,5 @@
 import {type Records,validateRecords} from './records';
-import {parseSnapshot,type Snapshot} from './snapshot';
+import {parseSnapshot,type Snapshot,type Backup,validateBackup} from './snapshot';
 export type LocalState=Records & {revision:number;lastSavedAt:string;lastMachine:string;peakCount:number;readMilestone:number;jsonMilestone:number;lastImportAt?:string;importantChanges?:number;cloudBackup?:{backupId:string;createdAt:string;sentAt?:string;backedUpChanges:number}};
 export const DB_NAME='yuu-karaoke-performance-log-v1';
 async function openDB():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>{r.result.createObjectStore('state');r.result.createObjectStore('recovery');};r.onsuccess=()=>{r.result.onversionchange=()=>r.result.close();resolve(r.result)};r.onerror=()=>reject(r.error);r.onblocked=()=>reject(Error('別のタブを閉じてください'));});}
@@ -82,4 +82,17 @@ export async function saveCloudSettings(settings:CloudSettings){
     const tx=db.transaction('state','readwrite');tx.objectStore('state').put(settings,'cloud-settings');
     tx.oncomplete=()=>{db.close();resolve()};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error)};
   });
+}
+
+// Store the exact upload before starting the network request. An interrupted
+// request resumes with the same ID after reload, without creating duplicates.
+export async function readPendingUpload():Promise<Backup|undefined>{
+  const db=await openDB();const upload=await new Promise<Backup|undefined>((resolve,reject)=>{const tx=db.transaction('state'),r=tx.objectStore('state').get('pending-cloud-upload');tx.oncomplete=()=>{db.close();resolve(r.result)};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error)}});
+  if(upload)await validateBackup(upload);return upload;
+}
+export async function savePendingUpload(backup:Backup){
+  await validateBackup(backup);const db=await openDB();return new Promise<void>((resolve,reject)=>{const tx=db.transaction('state','readwrite');tx.objectStore('state').put(backup,'pending-cloud-upload');tx.oncomplete=()=>{db.close();resolve()};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error)}});
+}
+export async function clearPendingUpload(id?:string){
+  const db=await openDB();return new Promise<void>((resolve,reject)=>{const tx=db.transaction('state','readwrite'),store=tx.objectStore('state'),r=store.get('pending-cloud-upload');r.onsuccess=()=>{if(!id||r.result?.backup_id===id)store.delete('pending-cloud-upload')};tx.oncomplete=()=>{db.close();resolve()};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error)}});
 }

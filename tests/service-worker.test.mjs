@@ -12,7 +12,7 @@ test('PWA更新は最新ファイルを取得し、クラウドAPIとIndexedDB�
   vm.runInNewContext(await readFile('public/sw.js','utf8'),context);
   const wait=fn=>{let task;fn({waitUntil(promise){task=promise}});return task};
   await wait(listeners.install);assert.ok(requested.every(r=>r.cache==='reload'));assert.ok(requested.every(r=>r.url.startsWith(scope)));
-  await wait(listeners.activate);assert.deepEqual(deleted,['yuu-karaoke-performance-log-v2','yuu-karaoke-performance-log-v3','yuu-karaoke-performance-log-v4','yuu-karaoke-performance-log-v5','yuu-karaoke-performance-log-v6','yuu-karaoke-performance-log-v7']);assert.equal(claimed,true);
+  await wait(listeners.activate);assert.deepEqual(deleted,['yuu-karaoke-performance-log-v2','yuu-karaoke-performance-log-v3','yuu-karaoke-performance-log-v4','yuu-karaoke-performance-log-v5','yuu-karaoke-performance-log-v6','yuu-karaoke-performance-log-v7','yuu-karaoke-performance-log-v8']);assert.equal(claimed,true);
   let response;
   listeners.fetch({request:new Request(scope+'assets/app.js'),respondWith(promise){response=promise}});
   assert.equal(await (await response).text(),'offline cached asset');
