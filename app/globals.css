@@ -102,4 +102,4 @@ html{color-scheme:light} header{background:#eaf4ff} .backupNotice{margin:12px 0;
 
 .cloudMigration{margin:12px 0;padding:14px;border:1px solid #bfdbfe;border-radius:14px;background:#eff6ff;font-size:14px;line-height:1.7}.cloudMigration p{margin:8px 0}.cloudMigration a{color:#1d4ed8;text-decoration:underline}.deviceManager{margin-top:18px;padding:14px;border:1px solid #dbeafe;border-radius:14px}.deviceManager h3{margin-top:0}.deviceManager p{line-height:1.7}.deviceManager .cloudHistory li{gap:12px;overflow-wrap:anywhere}
 
-.cloudTopSlot{display:contents}.cloudQuickBottom{position:static;margin-top:20px}.cloudDayReminder{display:block;margin-top:8px;color:#475569;font-size:12px;line-height:1.6}
+.cloudQuickBottom{position:static;margin-top:20px}.cloudDayReminder{display:block;margin-top:8px;color:#475569;font-size:12px;line-height:1.6}
