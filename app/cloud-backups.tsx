@@ -1,3 +1,5 @@
+import {createPortal} from 'react-dom';
+import {cloudBackupDue,untilTokyoMidnight} from '../lib/cloud-reminder';
 import {useEffect,useRef,useState} from 'react';
 import {captureSnapshot,markCloudBackup,readCloudSettings,saveCloudSettings,type LocalState} from '../lib/local-store';
 import {createBackup,validateBackup,type Backup,type BackupSummary} from '../lib/snapshot';
@@ -6,8 +8,10 @@ import {CLOUD_ORIGIN,hosted,CloudError,sessionStatus,login,logout,listSessions,r
 import {restoreFromCloud} from '../lib/cloud-restore';
 
 const stamp=(time:string)=>new Date(time).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
-export default function CloudBackups({local,disabled,onSaved,onRestored}:{local:LocalState|null;disabled:boolean;onSaved:(s:LocalState)=>void;onRestored:(s:LocalState)=>void}){
+export default function CloudBackups({local,disabled,onSaved,onRestored,topTarget}:{topTarget:HTMLDivElement|null;local:LocalState|null;disabled:boolean;onSaved:(s:LocalState)=>void;onRestored:(s:LocalState)=>void}){
   const persistent=hosted();
+  const [now,setNow]=useState(()=>Date.now());
+  useEffect(()=>{const refresh=()=>setNow(Date.now());const timer=setTimeout(refresh,untilTokyoMidnight(Date.now()));document.addEventListener('visibilitychange',refresh);window.addEventListener('focus',refresh);window.addEventListener('pageshow',refresh);return()=>{clearTimeout(timer);document.removeEventListener('visibilitychange',refresh);window.removeEventListener('focus',refresh);window.removeEventListener('pageshow',refresh)}},[now]);
   const [deviceName,setDeviceName]=useState('この端末'),[sessions,setSessions]=useState<DeviceSession[]|null>(null);
   const [url,setUrl]=useState(persistent?CLOUD_ORIGIN:''),[token,setToken]=useState(''),[deviceId,setDeviceId]=useState('');
   const [connected,setConnected]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -41,7 +45,7 @@ export default function CloudBackups({local,disabled,onSaved,onRestored}:{local:
     const saved=await uploadBackup(connection(),candidate);
     const verified=await validateBackup(saved);
     onSaved(await markCloudBackup(saved,verified.state.importantChanges??0));
-    setRetry(null);setNotice(`${saved.record_count}件のクラウド送信が完了しました ✓`);
+    setRetry(null);setNotice(`${saved.record_count}件のクラウド送信が完了しました ✓ 今日の送信ボタンは設定の上に移動しました`);
     try{await refresh()}catch{setError('送信は完了しましたが、履歴一覧を取得できませんでした。「履歴を更新」で再確認できます。')}
   }
   async function preview(id:string){const backup=await fetchBackup(connection(),id);const current=await captureSnapshot();setPending({backup,revision:current.state.revision,currentCount:current.state.songs.length})}
@@ -53,20 +57,25 @@ export default function CloudBackups({local,disabled,onSaved,onRestored}:{local:
   async function json(){const full=await createBackup(await captureSnapshot(),deviceId||null);const blob=new Blob([JSON.stringify(full,null,2)],{type:'application/json'});const objectUrl=URL.createObjectURL(blob),link=document.createElement('a');link.href=objectUrl;link.download=`カラオケ全データ_${full.created_at.replace(/[:.]/g,'-')}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(objectUrl),10000);setNotice('全データJSONのダウンロードを開始しました。端末で保存完了を確認してください')}
   async function inspect(file?:File){if(!file)return;await run(async()=>{if(file.size>17*1024*1024)throw Error('クラウド用JSONは17MBまでです');const backup=JSON.parse(await file.text());await validateBackup(backup);const current=await captureSnapshot();setPending({backup,revision:current.state.revision,currentCount:current.state.songs.length})})}
   const lastSent=local?.cloudBackup?.sentAt??local?.cloudBackup?.createdAt;
-  return <>
-    {!persistent&&<aside className="cloudMigration"><strong>ログインを保持できる専用アドレスができました</strong><p>① この端末で移行用JSONを保存 → ② <a href={CLOUD_ORIGIN} target="_blank" rel="noopener">新しいうたログを開く</a> → ③ 復旧キーで初回ログイン → ④ JSONを選び、内容を確認して復元。今の記録はこのアドレスにも残ります。</p><button className="outlineButton" disabled={blocked} onClick={()=>run(json)}>移行用の全データJSONを保存</button></aside>}
-    <section className="cloudQuick" aria-label="クラウド送信" aria-busy={busy}>
+  const due=cloudBackupDue(lastSent,now);
+  const quick=(
+    <section className={`cloudQuick ${due?'cloudQuickTop':'cloudQuickBottom'}`} aria-label="クラウド送信" aria-busy={busy}>
       <div className="cloudQuickRow">
         <button type="button" className="cloudSendButton" disabled={blocked} onClick={send}>{busy?'処理中…':retry?'クラウド送信を再試行':'クラウドへ送信'}</button>
         <div className="cloudSendStatus"><span>前回のクラウド送信</span><strong>{lastSent?<time dateTime={lastSent}>{stamp(lastSent)}</time>:'まだ送信していません'}</strong><small>未送信の変更：{changes}件{connected?' ・ '+(persistent?'ログイン保持中':'接続済み'):' ・ '+(persistent?'初回ログイン・再接続が必要':'未接続')}</small></div>
       </div>
+      {due&&local&&<small className="cloudDayReminder">{lastSent?'前回送信した日から日付が変わりました。今日のバックアップを保存しましょう。':'まだクラウドへ送信していません。最初のバックアップを保存しましょう。'}</small>}
       {error&&<p className="error" role="alert">{error}</p>}{notice&&<p className="notice" role="status">{notice}</p>}
     </section>
+  );
+  return <>
+    {!persistent&&<aside className="cloudMigration"><strong>ログインを保持できる専用アドレスができました</strong><p>① この端末で移行用JSONを保存 → ② <a href={CLOUD_ORIGIN} target="_blank" rel="noopener">新しいうたログを開く</a> → ③ 復旧キーで初回ログイン → ④ JSONを選び、内容を確認して復元。今の記録はこのアドレスにも残ります。</p><button className="outlineButton" disabled={blocked} onClick={()=>run(json)}>移行用の全データJSONを保存</button></aside>}
+    {due&&topTarget?createPortal(quick,topTarget):quick}
     <details ref={settingsRef} className="cloudSettings">
       <summary>クラウドの接続設定・バックアップ履歴</summary>
       <section className="dataManager cloudBackups" aria-labelledby="cloud-backup-title">
     <h2 id="cloud-backup-title">クラウドバックアップ</h2>
-    <p>普段の記録はこの端末に保存します。クラウドへは操作したときに履歴を追加します。</p>
+    <p>普段の記録はこの端末に保存します。クラウドへは操作したときに保存します。最新5世代（最新1件＋過去4件）を保持し、新しい保存と照合の成功後に6世代目以降を自動削除します。</p>
     <p>前回のクラウド送信：{lastSent?stamp(lastSent):'まだ送信していません'}<br/>未送信の変更：{changes}件。入力途中の内容は「記録する」で保存してから送信してください。</p>
     {changes>=15&&<p className="backupNotice" role="status">15件以上の変更があります。クラウドにもバックアップを保存してください。</p>}
     <p className="cloudHint">{persistent?'初回ログイン後は、この端末だけの通行証でログインを保持します。サーバー側の自動期限はありません。ブラウザのデータ消去や端末の解除後は復旧キーで再接続します。復旧キーは別の安全な場所で保管してください。':'復旧キーは別の安全な場所で保管してください。この旧アドレスでは画面を閉じると再入力が必要です。'}</p>

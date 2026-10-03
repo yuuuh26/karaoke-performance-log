@@ -1,5 +1,6 @@
 import {APP_ID,validateBackup,type Backup} from '../lib/snapshot';
 import {AuthError,verifyKey,getSession,sameOrigin,sessionCookie,sessionRoute} from './sessions';
+import {confirmAndPrune} from './retention';
 type Statement={bind(...args:unknown[]):Statement;first<T=Record<string,unknown>>():Promise<T|null>;all<T=Record<string,unknown>>():Promise<{results:T[]}>};
 type Database={prepare(sql:string):Statement;batch(statements:Statement[]):Promise<unknown[]>};
 export type Env={DB:Database;BACKUP_TOKEN_SHA256:string};
@@ -40,9 +41,9 @@ async function writeBackup(env:Env,input:Backup,id:string) {
   try{await validateBackup(input)}catch{throw new ApiError(400,'バックアップの形式・件数・照合値を確認してください')}
   if(input.backup_id!==id)throw new ApiError(400,'バックアップIDが一致しません');
   const existing=await find(env,id);
-  if(existing){const saved=await readBackup(env,id);if(saved.backup_json!==input.backup_json||saved.sha256!==input.sha256||saved.created_at!==input.created_at||saved.device_id!==input.device_id)throw new ApiError(409,'同じIDの別バックアップが存在します');return {backup_id:id,sha256:input.sha256,already_exists:true}}
+  if(existing){const saved=await readBackup(env,id);if(saved.backup_json!==input.backup_json||saved.sha256!==input.sha256||saved.created_at!==input.created_at||saved.device_id!==input.device_id)throw new ApiError(409,'同じIDの別バックアップが存在します');await finishBackup(env,id);return {backup_id:id,sha256:input.sha256,already_exists:true}}
   // 200,000 UTF-16 code units use <=800,000 UTF-8 bytes, below D1's
-  // 2MB per-row limit. <=42 chunks + one metadata insert fit a 50-query batch.
+  // 2MB per-row limit. <=42 chunks + metadata and retention inserts fit a 50-query batch.
   const chunks:string[]=[];
   for(let offset=0;offset<input.backup_json.length;){
     let end=Math.min(offset+200000,input.backup_json.length);
@@ -51,14 +52,20 @@ async function writeBackup(env:Env,input:Backup,id:string) {
     chunks.push(input.backup_json.slice(offset,end));offset=end;
   }
   const statements=[env.DB.prepare('INSERT INTO backups (backup_id,app_id,schema_version,created_at,received_at,device_id,record_count,source_revision,sha256,byte_length,chunk_count) VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind(id,APP_ID,input.schema_version,input.created_at,new Date().toISOString(),input.device_id,input.record_count,input.source_revision,input.sha256,input.byte_length,chunks.length),
+    env.DB.prepare('INSERT INTO backup_retention (backup_id,app_id) VALUES (?,?)').bind(id,APP_ID),
     ...chunks.map((text,index)=>env.DB.prepare('INSERT INTO backup_chunks (backup_id,chunk_index,backup_json) VALUES (?,?,?)').bind(id,index,text))];
   try{await env.DB.batch(statements)}catch{
     // Concurrent retries of an identical ID may lose the insert race.
     const winner=await find(env,id);
-    if(winner){const saved=await readBackup(env,id);if(saved.backup_json===input.backup_json&&saved.created_at===input.created_at&&saved.device_id===input.device_id)return {backup_id:id,sha256:input.sha256,already_exists:true};throw new ApiError(409,'同じIDの別バックアップが存在します')}
+    if(winner){const saved=await readBackup(env,id);if(saved.backup_json===input.backup_json&&saved.created_at===input.created_at&&saved.device_id===input.device_id){await finishBackup(env,id);return {backup_id:id,sha256:input.sha256,already_exists:true}};throw new ApiError(409,'同じIDの別バックアップが存在します')}
     throw new ApiError(503,'クラウドに保存できませんでした。端末の記録を保持してください');
   }
+  await finishBackup(env,id);
   return {backup_id:id,sha256:input.sha256,already_exists:false};
+}
+async function finishBackup(env:Env,id:string){
+  await readBackup(env,id);
+  try{await confirmAndPrune(env,id)}catch{throw new ApiError(503,'保存後の履歴整理を完了できませんでした。過去の履歴と端末の記録を保持しています。同じ送信を再試行してください')}
 }
 export default {async fetch(request:Request,env:Env):Promise<Response> {
   const origin=request.headers.get('Origin'),cors=origin===ORIGIN;
@@ -87,7 +94,7 @@ export default {async fetch(request:Request,env:Env):Promise<Response> {
     if(url.pathname==='/v1/backups'&&request.method==='GET') {
       const cursor=url.searchParams.get('cursor');let time='',id='';
       if(cursor){try{[time,id]=JSON.parse(atob(cursor));if(!time||!idPattern.test(id)||new Date(time).toISOString()!==time)throw Error()}catch{throw new ApiError(400,'一覧の続き位置が不正です')}}
-      const query=env.DB.prepare(`SELECT ${columns} FROM backups WHERE app_id=? ${cursor?'AND (received_at<? OR (received_at=? AND backup_id<?))':''} ORDER BY received_at DESC,backup_id DESC LIMIT 51`);
+      const query=env.DB.prepare(`SELECT ${columns.split(',').map(c=>'b.'+c).join(',')} FROM backups b JOIN backup_retention r ON r.backup_id=b.backup_id WHERE b.app_id=? AND r.version_number IS NOT NULL ${cursor?'AND (b.received_at<? OR (b.received_at=? AND b.backup_id<?))':''} ORDER BY r.version_number DESC LIMIT 51`);
       const rows=(await (cursor?query.bind(APP_ID,time,time,id):query.bind(APP_ID)).all<Row>()).results;
       const backups=rows.slice(0,50),last=backups.at(-1);
       return respond({backups,next_cursor:rows.length>50&&last?btoa(JSON.stringify([last.received_at,last.backup_id])):null},200);
