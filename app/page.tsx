@@ -123,7 +123,7 @@ export default function Home() {
   const cancelEdit=useCallback(()=>{ setEditingId(null); setForm({...emptyForm(),machine:local?.lastMachine??""}); setAutoFilledFrom(null); requestAnimationFrame(() => titleRef.current?.focus()); },[local?.lastMachine]);
 
   function applyPreviousSong(song:Song) {
-    setForm(current=>({...current,title:song.title,artist:song.artist,releaseYear:song.releaseYear == null ? "":String(song.releaseYear),key:song.key == null ? "":String(song.key),score:"",familiarity:song.familiarity,tempo:song.tempo ?? "",throatLoad:song.throatLoad,tagIds:song.tags.map(tag=>tag.id)}));
+    setForm(current=>({...current,title:song.title,artist:song.artist,releaseYear:song.releaseYear == null ? "":String(song.releaseYear),key:song.key == null ? "":String(song.key),familiarity:song.familiarity,tempo:song.tempo ?? "",throatLoad:song.throatLoad,tagIds:song.tags.map(tag=>tag.id)}));
     setAutoFilledFrom(song); setSuggestionsOpen(false); setError("");
   }
 
@@ -201,7 +201,7 @@ export default function Home() {
           <label className="machineField">採点機<select value={form.machine} title={form.machine || "未選択"} onChange={e=>setForm({...form,machine:e.target.value})}><option value="">未選択</option>{machines.map(machine=><option key={machine.id} value={machine.name}>{machine.name}</option>)}</select>{form.machine && <span className="selectedMachineName">選択中：{form.machine}</span>}</label>
           <label className="scoreField">採点点数<input inputMode="decimal" type="number" min="0" max="100" step="0.001" value={form.score} onChange={e=>setForm({...form,score:e.target.value})} placeholder="例 92.345" /></label>
         </div>
-        {autoFilledFrom && editingId == null && <p className="autoFillNotice">前回の記録から自動入力しました。採点機は現在の選択を維持し、点数は空欄です。姿勢は自動入力しません。各項目は自由に変更できます。</p>}
+        {autoFilledFrom && editingId == null && <p className="autoFillNotice">前回の記録から自動入力しました。採点機は現在の選択を維持し、入力済みの点数も保持します。姿勢は自動入力しません。各項目は自由に変更できます。</p>}
         <button type="button" className="manageButton" onClick={()=>setManageMachines(value=>!value)}>{manageMachines ? "採点機の管理を閉じる":"＋ 採点機の種類を管理"}</button>
         {manageMachines && <div className="machineManager"><div className="machineAdd"><input value={newMachine} onChange={e=>setNewMachine(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();addMachine();}}} placeholder="例：精密採点Ai" aria-label="追加する採点機名" /><button type="button" onClick={addMachine}>追加</button></div><div>{machines.map(machine=><span key={machine.id}>{machine.name}<button type="button" onClick={()=>deleteMachine(machine)} aria-label={`${machine.name}を削除`}>×</button></span>)}</div></div>}
         <div className="quickFields">
